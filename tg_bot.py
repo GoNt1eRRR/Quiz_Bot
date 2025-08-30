@@ -1,4 +1,3 @@
-import os
 import random
 from enum import Enum, auto
 from environs import Env
@@ -8,6 +7,7 @@ from telegram.ext import (
     CallbackContext, ConversationHandler
 )
 from redis_db import connect_to_db
+from utils import get_questions
 
 
 env = Env()
@@ -19,35 +19,12 @@ db = connect_to_db(
     password=env("REDIS_PASSWORD")
 )
 
-QUESTIONS = []
+QUESTIONS = {}
 
 
 class States(Enum):
     NEW_QUESTION = auto()
     WAITING_FOR_ANSWER = auto()
-
-
-def load_questions(folder="quiz-questions"):
-    questions = []
-    for filename in os.listdir(folder):
-        if filename.endswith(".txt"):
-            path = os.path.join(folder, filename)
-            with open(path, "r", encoding="koi8-r") as f:
-                content = f.read()
-
-            blocks = content.split("\n\n")
-            question, answer = None, None
-            for block in blocks:
-                block = block.strip()
-                if block.startswith("Вопрос"):
-                    question = block.split(":", 1)[1].strip()
-                elif block.startswith("Ответ"):
-                    answer = block.split(":", 1)[1].strip()
-
-                if question and answer:
-                    questions.append((question, answer))
-                    question, answer = None, None
-    return questions
 
 
 def normalize_answer(answer: str) -> str:
@@ -68,7 +45,7 @@ def start(update: Update, context: CallbackContext):
 
 def handle_new_question_request(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
-    question, answer = random.choice(QUESTIONS)
+    question, answer = random.choice(list(QUESTIONS.items()))
     db.set(f"user:{chat_id}:answer", answer)
     update.message.reply_text(question)
     return States.WAITING_FOR_ANSWER
@@ -81,7 +58,7 @@ def handle_solution_attempt(update: Update, context: CallbackContext):
 
     if user_answer == correct_answer:
         update.message.reply_text(
-            "Правильно! Поздравляю! 🎉\nДля следующего вопроса нажми «Новый вопрос»"
+            "Правильно! 🎉\nДля следующего вопроса нажми «Новый вопрос»"
         )
         db.incr(f"user:{chat_id}:score")
         return States.NEW_QUESTION
@@ -107,7 +84,7 @@ def handle_score(update: Update, context: CallbackContext):
 
 def main():
     global QUESTIONS
-    QUESTIONS = load_questions("quiz-questions")
+    QUESTIONS = get_questions("quiz-questions")
 
     TOKEN = env("TG_TOKEN")
     updater = Updater(TOKEN, use_context=True)
